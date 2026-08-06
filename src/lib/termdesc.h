@@ -204,6 +204,9 @@ typedef struct tinfo {
   HANDLE outhandle;
   DWORD inmode_preserved;
   DWORD outmode_preserved;
+  int stdinfd_preserved;
+  int stdinmode_preserved;
+  bool stdinmode_is_preserved;
   bool console_modes_preserved;
 #endif
 

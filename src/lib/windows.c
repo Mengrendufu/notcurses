@@ -2,6 +2,8 @@
 #include "internal.h"
 #include "windows.h"
 #ifdef __MINGW32__
+#include <fcntl.h>
+#include <io.h>
 // ti has been memset to all zeroes. windows configuration is static.
 int prepare_windows_terminal(tinfo* ti, size_t* tablelen, size_t* tableused){
   const struct wtermdesc {
@@ -119,10 +121,17 @@ int prepare_windows_terminal(tinfo* ti, size_t* tablelen, size_t* tableused){
 }
 
 int restore_windows_terminal(tinfo* ti){
-  if(!ti->console_modes_preserved){
-    return 0;
-  }
   int ret = 0;
+  if(ti->stdinmode_is_preserved){
+    if(_setmode(ti->stdinfd_preserved, ti->stdinmode_preserved) == -1){
+      logerror("couldn't restore stdin mode");
+      ret = -1;
+    }
+    ti->stdinmode_is_preserved = false;
+  }
+  if(!ti->console_modes_preserved){
+    return ret;
+  }
   if(!SetConsoleMode(ti->inhandle, ti->inmode_preserved)){
     logerror("couldn't restore input console mode");
     ret = -1;

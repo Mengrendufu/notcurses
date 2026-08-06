@@ -6,6 +6,9 @@
 #include "unixsig.h"
 #include "render.h"
 #include "in.h"
+#ifdef __MINGW32__
+#include <io.h>
+#endif
 
 // Notcurses takes over stdin, and if it is not connected to a terminal, also
 // tries to make a connection to the controlling terminal. If such a connection
@@ -26,6 +29,24 @@
 
 static sig_atomic_t cont_seen;
 static sig_atomic_t resize_seen;
+
+static int
+prepare_stdin_mode(tinfo* ti, int fd){
+#ifdef __MINGW32__
+  int mode = _setmode(fd, _O_BINARY);
+  if(mode == -1){
+    logerror("couldn't set stdin to binary mode");
+    return -1;
+  }
+  ti->stdinfd_preserved = fd;
+  ti->stdinmode_preserved = mode;
+  ti->stdinmode_is_preserved = true;
+#else
+  (void)ti;
+  (void)fd;
+#endif
+  return 0;
+}
 
 // called for SIGWINCH and SIGCONT, and causes block_on_input to return
 void sigwinch_handler(int signo){
@@ -1970,7 +1991,8 @@ create_inputctx(tinfo* ti, FILE* infp, int lmargin, int tmargin, int rmargin,
                       if(getpipes(i->ipipes) == 0){
                         memset(&i->amata, 0, sizeof(i->amata));
                         if(prep_special_keys(i) == 0){
-                          if(set_fd_nonblocking(i->stdinfd, 1, &ti->stdio_blocking_save) == 0){
+                          if(set_fd_nonblocking(i->stdinfd, 1, &ti->stdio_blocking_save) == 0 &&
+                             prepare_stdin_mode(ti, i->stdinfd) == 0){
                             i->termfd = tty_check(i->stdinfd) ? -1 : get_tty_fd(infp);
                             memset(i->initdata, 0, sizeof(*i->initdata));
                             if(sent_queries){
