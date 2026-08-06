@@ -54,6 +54,15 @@ int prepare_windows_terminal(tinfo* ti, size_t* tablelen, size_t* tableused){
     logerror("couldn't get output handle");
     return -1;
   }
+  if(!GetConsoleMode(ti->inhandle, &ti->inmode_preserved)){
+    logerror("couldn't preserve input console mode");
+    return -1;
+  }
+  if(!GetConsoleMode(ti->outhandle, &ti->outmode_preserved)){
+    logerror("couldn't preserve output console mode");
+    return -1;
+  }
+  ti->console_modes_preserved = true;
   if(!SetConsoleOutputCP(CP_UTF8)){
     logerror("couldn't set output page to utf8");
     return -1;
@@ -107,5 +116,22 @@ int prepare_windows_terminal(tinfo* ti, size_t* tablelen, size_t* tableused){
   }
   ti->qterm = TERMINAL_MSTERMINAL;
   return 0;
+}
+
+int restore_windows_terminal(tinfo* ti){
+  if(!ti->console_modes_preserved){
+    return 0;
+  }
+  int ret = 0;
+  if(!SetConsoleMode(ti->inhandle, ti->inmode_preserved)){
+    logerror("couldn't restore input console mode");
+    ret = -1;
+  }
+  if(!SetConsoleMode(ti->outhandle, ti->outmode_preserved)){
+    logerror("couldn't restore output console mode");
+    ret = -1;
+  }
+  ti->console_modes_preserved = false;
+  return ret;
 }
 #endif

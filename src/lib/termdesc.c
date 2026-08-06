@@ -1373,13 +1373,16 @@ int interrogate_terminfo(tinfo* ti, FILE* out, unsigned utf8,
       free(ti->tpreserved);
       return -1;
     }
-    // enter cbreak mode regardless of user preference until we've performed
-    // terminal interrogation. at that point, we might restore original mode.
+#endif
+    // Enter cbreak mode regardless of user preference until we've performed
+    // terminal interrogation. Query replies must not pass through the console
+    // line editor or be echoed back into the output stream.
     if(cbreak_mode(ti)){
+#ifndef __MINGW32__
       free(ti->tpreserved);
+#endif
       return -1;
     }
-#endif
     // if we already know our terminal (e.g. on the linux console), there's no
     // need to send the identification queries. the controls are sufficient.
     bool minimal = (ti->qterm != TERMINAL_UNKNOWN);

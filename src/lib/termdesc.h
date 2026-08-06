@@ -202,6 +202,9 @@ typedef struct tinfo {
 #elif defined(__MINGW32__)
   HANDLE inhandle;
   HANDLE outhandle;
+  DWORD inmode_preserved;
+  DWORD outmode_preserved;
+  bool console_modes_preserved;
 #endif
 
   // kitty keyboard protocol level. we initialize this to UINT_MAX, in case we

@@ -17,6 +17,9 @@
 #include "compat/compat.h"
 #include "unixsig.h"
 #include "banner.h"
+#ifdef __MINGW32__
+#include "windows.h"
+#endif
 
 #define ESC "\x1b"
 #define TABSTOP 8
@@ -170,6 +173,9 @@ notcurses_stop_minimal(void* vnc, void** altstack, int errret){
       }
     }
   }
+#ifdef __MINGW32__
+  ret |= restore_windows_terminal(&nc->tcache);
+#endif
   if(errret){
     ret = errret;
   }

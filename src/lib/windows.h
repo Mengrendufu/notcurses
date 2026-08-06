@@ -11,6 +11,9 @@ struct tinfo;
 int prepare_windows_terminal(struct tinfo* ti, size_t* tablelen,
                              size_t* tableused);
 
+// Restore console modes captured by prepare_windows_terminal().
+int restore_windows_terminal(struct tinfo* ti);
+
 #ifdef __cplusplus
 }
 #endif
