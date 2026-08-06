@@ -2432,7 +2432,9 @@ process_melange(inputctx* ictx, const unsigned char* buf, int* bufused){
       consumed = process_escape(ictx, buf + offset, *bufused);
       if(consumed < 0){
         if(ictx->midescape){
-          if(*bufused != -consumed || *bufused == origlen){
+          // Initial query responses may span multiple reads.
+          if(*bufused != -consumed ||
+             (*bufused == origlen && ictx->initdata == NULL)){
             // not at the end; treat it as input. no need to move between
             // buffers; simply ensure we process it as input, and don't mark
             // anything as consumed.
@@ -2511,7 +2513,8 @@ static int
 block_on_input(inputctx* ictx, unsigned* rtfd, unsigned* rifd){
   logtrace("blocking on input availability");
   *rtfd = *rifd = 0;
-  unsigned nonblock = ictx->midescape;
+  // Resolve an ambiguous Esc only after initial response handoff.
+  unsigned nonblock = ictx->midescape && ictx->initdata == NULL;
   if(nonblock){
     loginfo("nonblocking read to check for completion");
     ictx->midescape = 0;
