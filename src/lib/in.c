@@ -82,6 +82,8 @@ typedef struct inputctx {
                         //  if stdin is a terminal, or on MSFT Terminal.
 #ifdef __MINGW32__
   HANDLE stdinhandle;   // handle to input terminal for MSFT Terminal
+  HANDLE stopevent;     // wakes the input thread during orderly shutdown
+  volatile LONG stopping;
 #endif
 
   int lmargin, tmargin; // margins in use at left and top
@@ -2016,6 +2018,8 @@ create_inputctx(tinfo* ti, FILE* infp, int lmargin, int tmargin, int rmargin,
                             i->stdineof = 0;
 #ifdef __MINGW32__
                             i->stdinhandle = ti->inhandle;
+                            i->stopevent = NULL;
+                            i->stopping = FALSE;
 #endif
                             i->ibufvalid = 0;
                             i->linesigs = linesigs_enabled;
@@ -2063,6 +2067,11 @@ free_inputctx(inputctx* i){
     if(i->termfd >= 0){
       close(i->termfd);
     }
+#ifdef __MINGW32__
+    if(i->stopevent){
+      CloseHandle(i->stopevent);
+    }
+#endif
     pthread_mutex_destroy(&i->ilock);
     pthread_cond_destroy(&i->icond);
     pthread_mutex_destroy(&i->clock);
@@ -2522,7 +2531,7 @@ block_on_input(inputctx* ictx, unsigned* rtfd, unsigned* rifd){
 #ifdef __MINGW32__
   int timeoutms = nonblock ? 0 : -1;
   DWORD ncount = 0;
-  HANDLE handles[2];
+  HANDLE handles[3];
   if(!ictx->stdineof){
     if(ictx->ibufvalid != sizeof(ictx->ibuf)){
       handles[ncount++] = ictx->stdinhandle;
@@ -2531,12 +2540,19 @@ block_on_input(inputctx* ictx, unsigned* rtfd, unsigned* rifd){
   if(ncount == 0){
     handles[ncount++] = ictx->ipipes[0];
   }
+  handles[ncount++] = ictx->stopevent;
   DWORD d = WaitForMultipleObjects(ncount, handles, false, timeoutms);
   if(d == WAIT_TIMEOUT){
     return 0;
   }else if(d == WAIT_FAILED){
     return -1;
-  }else if(d - WAIT_OBJECT_0 == 0){
+  }
+  DWORD index = d - WAIT_OBJECT_0;
+  if(index >= ncount){
+    return -1;
+  }else if(handles[index] == ictx->stopevent){
+    return 0;
+  }else if(handles[index] == ictx->stdinhandle){
     *rifd = 1;
     return 1;
   }
@@ -2653,7 +2669,17 @@ input_thread(void* vmarshall){
     handoff_initial_responses_late(ictx);
   }
   for(;;){
+#ifdef __MINGW32__
+    if(InterlockedCompareExchange(&ictx->stopping, FALSE, FALSE)){
+      break;
+    }
+#endif
     read_inputs_nblock(ictx);
+#ifdef __MINGW32__
+    if(InterlockedCompareExchange(&ictx->stopping, FALSE, FALSE)){
+      break;
+    }
+#endif
     // process anything we've read
     process_ibuf(ictx);
   }
@@ -2668,6 +2694,13 @@ int init_inputlayer(tinfo* ti, FILE* infp, int lmargin, int tmargin,
   if(ictx == NULL){
     return -1;
   }
+#ifdef __MINGW32__
+  ictx->stopevent = CreateEventW(NULL, TRUE, FALSE, NULL);
+  if(ictx->stopevent == NULL){
+    free_inputctx(ictx);
+    return -1;
+  }
+#endif
   if(pthread_create(&ictx->tid, NULL, input_thread, ictx)){
     free_inputctx(ictx);
     return -1;
@@ -2680,16 +2713,36 @@ int init_inputlayer(tinfo* ti, FILE* infp, int lmargin, int tmargin,
 int stop_inputlayer(tinfo* ti){
   int ret = 0;
   if(ti){
-    // FIXME cancellation on shutdown does not yet work on windows #2192
-#ifndef __MINGW32__
     if(ti->ictx){
       loginfo("tearing down input thread");
+#ifndef __MINGW32__
       ret |= cancel_and_join("input", ti->ictx->tid, NULL);
       ret |= set_fd_nonblocking(ti->ictx->stdinfd, ti->stdio_blocking_save, NULL);
+#else
+      InterlockedExchange(&ti->ictx->stopping, TRUE);
+      if(!SetEvent(ti->ictx->stopevent)){
+        ret = -1;
+      }
+      HANDLE thread = pthread_gethandle(ti->ictx->tid);
+      if(thread == NULL){
+        ret = -1;
+      }else{
+        DWORD status;
+        do{
+          // The input thread can be inside UCRT's synchronous _read().
+          (void)CancelSynchronousIo(thread);
+          status = WaitForSingleObject(thread, 10);
+        }while(status == WAIT_TIMEOUT);
+        if(status != WAIT_OBJECT_0){
+          ret = -1;
+        }else if(pthread_join(ti->ictx->tid, NULL)){
+          ret = -1;
+        }
+      }
+#endif
       free_inputctx(ti->ictx);
       ti->ictx = NULL;
     }
-#endif
   }
   return ret;
 }

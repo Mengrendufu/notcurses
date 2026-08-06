@@ -18,6 +18,7 @@
 #include "unixsig.h"
 #include "banner.h"
 #ifdef __MINGW32__
+#include "in.h"
 #include "windows.h"
 #endif
 
@@ -1458,6 +1459,10 @@ int notcurses_stop(notcurses* nc){
   int ret = 0;
   if(nc){
     void* altstack;
+#ifdef __MINGW32__
+    // _setmode() cannot restore stdin while the input thread is in _read().
+    ret |= stop_inputlayer(&nc->tcache);
+#endif
     ret |= notcurses_stop_minimal(nc, &altstack, 0);
     // if we were not using the alternate screen, our cursor's wherever we last
     // wrote. move it to the furthest place to which it advanced.
