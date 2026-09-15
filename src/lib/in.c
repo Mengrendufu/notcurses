@@ -569,7 +569,12 @@ load_ncinput(inputctx* ictx, ncinput *tni){
   ++ictx->ivalid;
   // FIXME we don't always need to write here; write if ictx->ivalid was 0, and
   // also write *from the client context* if we empty the input buffer there..?
+#ifndef __MINGW32__
+  // Windows has no reader for this readiness pipe (inputready_fd() returns -1
+  // there, and internal_get() cannot drain it), so a byte per input fills the
+  // pipe and then blocks this thread forever while holding ilock.
   mark_pipe_ready(ictx->readypipes);
+#endif
   pthread_mutex_unlock(&ictx->ilock);
   pthread_cond_broadcast(&ictx->icond);
   send_synth_signal(synth);
@@ -2555,6 +2560,21 @@ block_on_input(inputctx* ictx, unsigned* rtfd, unsigned* rifd){
   }else if(handles[index] == ictx->stdinhandle){
     *rifd = 1;
     return 1;
+  }else if(handles[index] == ictx->ipipes[0]){
+    // Nothing consumes this pipe's byte stream on Windows, and a signaled pipe
+    // handle would keep this wait from blocking. Drain the wake here, or the
+    // client (which writes while holding ilock) blocks forever once it fills.
+    DWORD avail = 0;
+    char sig;
+    DWORD got = 0;
+    while(PeekNamedPipe(ictx->ipipes[0], NULL, 0, NULL, &avail, NULL)
+          && avail > 0){
+      if(!ReadFile(ictx->ipipes[0], &sig, sizeof(sig), &got, NULL)
+         || got == 0){
+        break;
+      }
+    }
+    return -1;
   }
   return -1;
 #else
@@ -2653,7 +2673,10 @@ read_inputs_nblock(inputctx* ictx){
     // did we switch from non-EOF state to EOF? if so, mark us ready
     if(!eof && ictx->stdineof){
       // we hit EOF; write an event to the readiness fd
+#ifndef __MINGW32__
+      // see load_ncinput(): this pipe has no reader on Windows
       mark_pipe_ready(ictx->readypipes);
+#endif
       pthread_cond_broadcast(&ictx->icond);
     }
   }
